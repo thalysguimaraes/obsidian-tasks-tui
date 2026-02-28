@@ -48,10 +48,11 @@ type Model struct {
 	contentCursor int
 	scrollOffset  int
 
-	todayTasks     []int
-	overdueStart   int
-	upcomingGroups []DateGroup
-	logbookGroups  []DateGroup
+	todayTasks      []int
+	overdueStart    int
+	upcomingGroups  []DateGroup
+	logbookGroups   []DateGroup
+	logbookDayIndex int
 
 	mode       int
 	width      int
@@ -202,6 +203,9 @@ func (m *Model) buildViews() {
 		})
 	}
 
+	if m.logbookDayIndex >= len(m.logbookGroups) {
+		m.logbookDayIndex = max(0, len(m.logbookGroups)-1)
+	}
 	m.clampCursor()
 }
 
@@ -216,11 +220,10 @@ func (m *Model) currentViewTasks() []int {
 		}
 		return flat
 	case viewLogbook:
-		var flat []int
-		for _, g := range m.logbookGroups {
-			flat = append(flat, g.Tasks...)
+		if len(m.logbookGroups) > 0 && m.logbookDayIndex < len(m.logbookGroups) {
+			return m.logbookGroups[m.logbookDayIndex].Tasks
 		}
-		return flat
+		return nil
 	}
 	return nil
 }
@@ -246,11 +249,10 @@ func (m *Model) viewTaskCount(view int) int {
 		}
 		return count
 	case viewLogbook:
-		count := 0
-		for _, g := range m.logbookGroups {
-			count += len(g.Tasks)
+		if len(m.logbookGroups) > 0 && m.logbookDayIndex < len(m.logbookGroups) {
+			return len(m.logbookGroups[m.logbookDayIndex].Tasks)
 		}
-		return count
+		return 0
 	}
 	return 0
 }
@@ -618,6 +620,22 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.buildViews()
 		}
 
+	case "left":
+		if m.activeView == viewLogbook && len(m.logbookGroups) > 0 {
+			if m.logbookDayIndex < len(m.logbookGroups)-1 {
+				m.logbookDayIndex++
+				m.contentCursor = 0
+				m.scrollOffset = 0
+			}
+		}
+
+	case "right":
+		if m.activeView == viewLogbook && m.logbookDayIndex > 0 {
+			m.logbookDayIndex--
+			m.contentCursor = 0
+			m.scrollOffset = 0
+		}
+
 	case "?":
 		m.mode = modeHelp
 
@@ -861,39 +879,67 @@ func (m Model) renderUpcomingView(maxWidth, maxHeight int) string {
 }
 
 func (m Model) renderLogbookView(maxWidth, maxHeight int) string {
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.cfg.Theme.Accent)).
-		Bold(true)
-	title := titleStyle.Render("  Logbook")
-
-	var rows []string
-	rows = append(rows, title)
-	rows = append(rows, "")
-
 	if len(m.logbookGroups) == 0 {
+		titleStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(m.cfg.Theme.Accent)).
+			Bold(true)
 		emptyStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.cfg.Theme.Muted)).
 			Italic(true).
 			PaddingLeft(2)
-		rows = append(rows, emptyStyle.Render("Logbook is empty"))
-		return strings.Join(rows, "\n")
+		return titleStyle.Render("  Logbook") + "\n\n" + emptyStyle.Render("Logbook is empty")
 	}
 
-	isActive := m.focus == focusContent
-	flatIdx := 0
-	for _, g := range m.logbookGroups {
-		headerStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(m.cfg.Theme.Muted))
-		header := fmt.Sprintf("  ── %s %s", g.Label, strings.Repeat("─", max(0, maxWidth-len(g.Label)-6)))
-		rows = append(rows, headerStyle.Render(header))
+	g := m.logbookGroups[m.logbookDayIndex]
 
-		for _, taskIdx := range g.Tasks {
-			selected := flatIdx == m.contentCursor && isActive
-			row := m.renderLogbookTaskRow(m.allTasks[taskIdx], selected, maxWidth)
-			rows = append(rows, row)
-			flatIdx++
-		}
-		rows = append(rows, "")
+	leftArrow := "  "
+	rightArrow := "  "
+	arrowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.cfg.Theme.Accent)).Bold(true)
+	mutedArrow := lipgloss.NewStyle().Foreground(lipgloss.Color(m.cfg.Theme.Muted))
+	if m.logbookDayIndex < len(m.logbookGroups)-1 {
+		leftArrow = arrowStyle.Render("◀ ")
+	} else {
+		leftArrow = mutedArrow.Render("◀ ")
+	}
+	if m.logbookDayIndex > 0 {
+		rightArrow = arrowStyle.Render(" ▶")
+	} else {
+		rightArrow = mutedArrow.Render(" ▶")
+	}
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.cfg.Theme.Accent)).
+		Bold(true)
+	dateLabel := g.Date.Format("Mon, Jan 02 2006")
+	today := time.Now().Truncate(24 * time.Hour)
+	if g.Date.Truncate(24*time.Hour).Equal(today) {
+		dateLabel = "Today · " + g.Date.Format("Jan 02")
+	} else if g.Date.Truncate(24*time.Hour).Equal(today.AddDate(0, 0, -1)) {
+		dateLabel = "Yesterday · " + g.Date.Format("Jan 02")
+	}
+	title := leftArrow + titleStyle.Render(fmt.Sprintf(" %s ", dateLabel)) + rightArrow
+
+	counterStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.cfg.Theme.Muted))
+	counter := counterStyle.Render(fmt.Sprintf("  %d/%d days", m.logbookDayIndex+1, len(m.logbookGroups)))
+
+	var rows []string
+	rows = append(rows, "  "+title)
+	rows = append(rows, counter)
+	rows = append(rows, "")
+
+	isActive := m.focus == focusContent
+	for i, taskIdx := range g.Tasks {
+		selected := i == m.contentCursor && isActive
+		row := m.renderLogbookTaskRow(m.allTasks[taskIdx], selected, maxWidth)
+		rows = append(rows, row)
+	}
+
+	if len(g.Tasks) == 0 {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(m.cfg.Theme.Muted)).
+			Italic(true).
+			PaddingLeft(2)
+		rows = append(rows, emptyStyle.Render("No completed tasks"))
 	}
 
 	return strings.Join(rows, "\n")
@@ -1010,6 +1056,9 @@ func (m Model) renderFooter(width int) string {
 	}
 
 	keys := "n new  d done  s reschedule  e edit  D del  / filter  ? help  q quit"
+	if m.activeView == viewLogbook {
+		keys = "←/→ prev/next day  / filter  ? help  q quit"
+	}
 
 	keyStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#666666"))
@@ -1034,6 +1083,7 @@ func (m Model) renderHelp() string {
     h/l             Sidebar / Content
     Tab             Toggle focus
     1/2/3           Today / Upcoming / Logbook
+    ←/→             Logbook: prev/next day
     Enter           Select / toggle done
 
   Actions
