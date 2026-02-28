@@ -671,7 +671,7 @@ func (m Model) View() string {
 	}
 
 	totalWidth := m.width - 4
-	sidebarWidth := 16
+	sidebarWidth := 22
 	contentWidth := totalWidth - sidebarWidth - 1
 	contentHeight := m.height - 5
 
@@ -722,7 +722,7 @@ func (m Model) renderSidebar(width, height int) string {
 		view  int
 	}
 	items := []sidebarItem{
-		{"☀", "Today", viewToday},
+		{"☀️", "Today", viewToday},
 		{"📅", "Upcoming", viewUpcoming},
 		{"📓", "Logbook", viewLogbook},
 	}
