@@ -29,6 +29,7 @@ const (
 	modeFilter
 	modeHelp
 	modeConfirmDelete
+	modeReschedule
 )
 
 type DateGroup struct {
@@ -286,7 +287,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		if m.mode == modeNewTask || m.mode == modeEditTask || m.mode == modeFilter {
+		if m.mode == modeNewTask || m.mode == modeEditTask || m.mode == modeFilter || m.mode == modeReschedule {
 			return m.handleInputMode(msg)
 		}
 		if m.mode == modeHelp {
@@ -402,6 +403,30 @@ func (m Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeNormal
 			m.filter = value
 			m.buildViews()
+
+		case modeReschedule:
+			m.mode = modeNormal
+			if value == "" {
+				return m, nil
+			}
+			task := m.selectedTask()
+			if task == nil {
+				return m, nil
+			}
+			newDate, err := parseRelativeDate(value)
+			if err != nil {
+				m.statusMsg = "Invalid date: " + value
+				m.statusTime = time.Now()
+				return m, nil
+			}
+			if err := RescheduleTask(task, newDate); err != nil {
+				m.err = err
+				m.statusMsg = "Error: " + err.Error()
+			} else {
+				m.statusMsg = "Rescheduled → " + newDate.Format("Jan 02")
+				m.statusTime = time.Now()
+				m = m.reload()
+			}
 		}
 		return m, nil
 	}
@@ -568,6 +593,18 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case "s":
+		if m.focus == focusContent && m.activeView != viewLogbook {
+			task := m.selectedTask()
+			if task != nil {
+				m.mode = modeReschedule
+				m.input.Placeholder = "Date: 2006-01-02, +3d, mon, tomorrow"
+				m.input.SetValue("")
+				m.input.Focus()
+				return m, m.input.Cursor.BlinkCmd()
+			}
+		}
+
 	case "/":
 		m.mode = modeFilter
 		m.input.Placeholder = "Filter tasks..."
@@ -628,12 +665,14 @@ func (m Model) View() string {
 	footer := m.renderFooter(totalWidth)
 
 	var inputArea string
-	if m.mode == modeNewTask || m.mode == modeEditTask || m.mode == modeFilter {
+	if m.mode == modeNewTask || m.mode == modeEditTask || m.mode == modeFilter || m.mode == modeReschedule {
 		prefix := " New: "
 		if m.mode == modeEditTask {
 			prefix = " Edit: "
 		} else if m.mode == modeFilter {
 			prefix = " Filter: "
+		} else if m.mode == modeReschedule {
+			prefix = " Reschedule: "
 		}
 		prefixStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.cfg.Theme.Accent)).
@@ -970,7 +1009,7 @@ func (m Model) renderFooter(width int) string {
 		statusPart = statusStyle.Render(" "+m.statusMsg) + "  "
 	}
 
-	keys := "n new  d done  e edit  D del  / filter  ? help  q quit"
+	keys := "n new  d done  s reschedule  e edit  D del  / filter  ? help  q quit"
 
 	keyStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#666666"))
@@ -1001,6 +1040,7 @@ func (m Model) renderHelp() string {
     n               New task
     e               Edit task
     d               Toggle done/undone
+    s               Reschedule task
     D               Delete task
     /               Filter by text
     r               Reload from files
@@ -1017,4 +1057,57 @@ func (m Model) renderHelp() string {
 	return lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
 		style.Render(helpText))
+}
+
+func parseRelativeDate(input string) (time.Time, error) {
+	input = strings.TrimSpace(strings.ToLower(input))
+	today := time.Now().Truncate(24 * time.Hour)
+
+	if t, err := time.Parse("2006-01-02", input); err == nil {
+		return t, nil
+	}
+
+	switch input {
+	case "today":
+		return today, nil
+	case "tomorrow", "tmr":
+		return today.AddDate(0, 0, 1), nil
+	}
+
+	days := map[string]time.Weekday{
+		"mon": time.Monday, "monday": time.Monday,
+		"tue": time.Tuesday, "tuesday": time.Tuesday,
+		"wed": time.Wednesday, "wednesday": time.Wednesday,
+		"thu": time.Thursday, "thursday": time.Thursday,
+		"fri": time.Friday, "friday": time.Friday,
+		"sat": time.Saturday, "saturday": time.Saturday,
+		"sun": time.Sunday, "sunday": time.Sunday,
+	}
+	if wd, ok := days[input]; ok {
+		d := today.AddDate(0, 0, 1)
+		for d.Weekday() != wd {
+			d = d.AddDate(0, 0, 1)
+		}
+		return d, nil
+	}
+
+	if strings.HasPrefix(input, "+") {
+		s := strings.TrimPrefix(input, "+")
+		unit := s[len(s)-1]
+		numStr := s[:len(s)-1]
+		var n int
+		if _, err := fmt.Sscanf(numStr, "%d", &n); err != nil {
+			return time.Time{}, fmt.Errorf("invalid offset: %s", input)
+		}
+		switch unit {
+		case 'd':
+			return today.AddDate(0, 0, n), nil
+		case 'w':
+			return today.AddDate(0, 0, n*7), nil
+		case 'm':
+			return today.AddDate(0, n, 0), nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unrecognized date: %s", input)
 }

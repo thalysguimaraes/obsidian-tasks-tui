@@ -274,6 +274,31 @@ created: %s
 	return writeLines(fp, lines)
 }
 
+// RescheduleTask changes a task's due date in the file.
+func RescheduleTask(task *Task, newDate time.Time) error {
+	lines, err := readLines(task.FilePath)
+	if err != nil {
+		return err
+	}
+	idx := task.LineNumber - 1
+	if idx < 0 || idx >= len(lines) {
+		return fmt.Errorf("line %d out of range", task.LineNumber)
+	}
+
+	line := lines[idx]
+	newDateStr := newDate.Format("2006-01-02")
+	if dueDateRe.MatchString(line) {
+		line = dueDateRe.ReplaceAllString(line, "📅 "+newDateStr)
+	} else {
+		line = line + " 📅 " + newDateStr
+	}
+
+	lines[idx] = line
+	task.RawLine = line
+	task.DueDate = newDate
+	return writeLines(task.FilePath, lines)
+}
+
 // UpdateTaskLine replaces a task's line in its file with new text.
 func UpdateTaskLine(task *Task, newLine string) error {
 	lines, err := readLines(task.FilePath)
