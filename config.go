@@ -20,9 +20,10 @@ type VaultConfig struct {
 }
 
 type TasksConfig struct {
-	SectionHeading string `toml:"section_heading"`
-	LookbackDays   int    `toml:"lookback_days"`
-	LookaheadDays  int    `toml:"lookahead_days"`
+	SectionHeading string   `toml:"section_heading"`
+	LogbookDays    int      `toml:"logbook_days"`
+	LookaheadDays  int      `toml:"lookahead_days"`
+	ExcludeTags    []string `toml:"exclude_tags"`
 }
 
 type ThemeConfig struct {
@@ -31,6 +32,7 @@ type ThemeConfig struct {
 	Today    string `toml:"today"`
 	Upcoming string `toml:"upcoming"`
 	Done     string `toml:"done"`
+	Muted    string `toml:"muted"`
 }
 
 func DefaultConfig() Config {
@@ -42,8 +44,9 @@ func DefaultConfig() Config {
 		},
 		Tasks: TasksConfig{
 			SectionHeading: "## :LiPencil: Open Space",
-			LookbackDays:   7,
+			LogbookDays:    30,
 			LookaheadDays:  14,
+			ExcludeTags:    []string{"#habit"},
 		},
 		Theme: ThemeConfig{
 			Accent:   "#7571F9",
@@ -51,6 +54,7 @@ func DefaultConfig() Config {
 			Today:    "#1e90ff",
 			Upcoming: "#888888",
 			Done:     "#02BF87",
+			Muted:    "#555555",
 		},
 	}
 }

@@ -81,8 +81,9 @@ func ParseTask(line string, filePath string, lineNumber int, noteDate time.Time)
 	}, true
 }
 
-// ParseFile reads a daily note and extracts all tasks.
-func ParseFile(filePath string, noteDate time.Time) ([]Task, error) {
+// ParseFile reads a daily note and extracts tasks within the given section.
+// If sectionHeading is empty, all tasks in the file are returned.
+func ParseFile(filePath string, noteDate time.Time, sectionHeading string) ([]Task, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -92,11 +93,38 @@ func ParseFile(filePath string, noteDate time.Time) ([]Task, error) {
 	var tasks []Task
 	scanner := bufio.NewScanner(f)
 	lineNum := 0
+	inSection := sectionHeading == ""
+	sectionLevel := ""
+	if sectionHeading != "" {
+		for _, ch := range sectionHeading {
+			if ch == '#' {
+				sectionLevel += "#"
+			} else {
+				break
+			}
+		}
+	}
+
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
-		if t, ok := ParseTask(line, filePath, lineNum, noteDate); ok {
-			tasks = append(tasks, *t)
+		trimmed := strings.TrimSpace(line)
+
+		if sectionHeading != "" {
+			if trimmed == sectionHeading {
+				inSection = true
+				continue
+			}
+			if inSection && strings.HasPrefix(trimmed, sectionLevel+" ") && !strings.HasPrefix(trimmed, sectionLevel+"#") {
+				inSection = false
+				continue
+			}
+		}
+
+		if inSection {
+			if t, ok := ParseTask(line, filePath, lineNum, noteDate); ok {
+				tasks = append(tasks, *t)
+			}
 		}
 	}
 	return tasks, scanner.Err()
@@ -106,7 +134,7 @@ func ParseFile(filePath string, noteDate time.Time) ([]Task, error) {
 func ScanDailyNotes(cfg Config) ([]Task, error) {
 	dir := filepath.Join(cfg.Vault.Path, cfg.Vault.DailyNotesDir)
 	today := time.Now().Truncate(24 * time.Hour)
-	start := today.AddDate(0, 0, -cfg.Tasks.LookbackDays)
+	start := today.AddDate(0, 0, -cfg.Tasks.LogbookDays)
 	end := today.AddDate(0, 0, cfg.Tasks.LookaheadDays)
 
 	var allTasks []Task
@@ -117,11 +145,30 @@ func ScanDailyNotes(cfg Config) ([]Task, error) {
 		if _, err := os.Stat(fp); os.IsNotExist(err) {
 			continue
 		}
-		tasks, err := ParseFile(fp, d)
+		tasks, err := ParseFile(fp, d, cfg.Tasks.SectionHeading)
 		if err != nil {
 			return nil, fmt.Errorf("parsing %s: %w", fp, err)
 		}
-		allTasks = append(allTasks, tasks...)
+		for _, t := range tasks {
+			if len(t.Tags) == 0 {
+				continue
+			}
+			excluded := false
+			for _, tag := range t.Tags {
+				for _, ex := range cfg.Tasks.ExcludeTags {
+					if tag == ex || strings.HasPrefix(tag, ex+"/") {
+						excluded = true
+						break
+					}
+				}
+				if excluded {
+					break
+				}
+			}
+			if !excluded {
+				allTasks = append(allTasks, t)
+			}
+		}
 	}
 
 	return allTasks, nil
