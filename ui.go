@@ -308,6 +308,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.input.Width = m.width - 16
 		return m, nil
 
 	case tea.KeyMsg:
@@ -1273,8 +1274,8 @@ func (m Model) renderHelp() string {
 	style := lipgloss.NewStyle().
 		Border(subtleBorder).
 		BorderForeground(lipgloss.Color(m.cfg.Theme.Accent)).
-		Padding(1, 3).
-		Width(48)
+		Padding(1, 4).
+		Width(56)
 
 	return lipgloss.Place(m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
