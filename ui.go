@@ -30,6 +30,7 @@ const (
 	modeHelp
 	modeConfirmDelete
 	modeReschedule
+	modePriority
 )
 
 type DateGroup struct {
@@ -159,12 +160,23 @@ func (m *Model) buildViews() {
 		}
 	}
 
+	sortByPriority := func(indices []int) {
+		for i := 0; i < len(indices); i++ {
+			for j := i + 1; j < len(indices); j++ {
+				if m.allTasks[indices[j]].Priority < m.allTasks[indices[i]].Priority {
+					indices[i], indices[j] = indices[j], indices[i]
+				}
+			}
+		}
+	}
+	sortByPriority(todayUndone)
 	m.todayTasks = append(m.todayTasks, todayUndone...)
 	m.overdueStart = len(m.todayTasks)
 	sortByDueDate := func(indices []int) {
 		for i := 0; i < len(indices); i++ {
 			for j := i + 1; j < len(indices); j++ {
-				if m.allTasks[indices[j]].DueDate.Before(m.allTasks[indices[i]].DueDate) {
+				ti, tj := m.allTasks[indices[i]], m.allTasks[indices[j]]
+				if tj.DueDate.Before(ti.DueDate) || (tj.DueDate.Equal(ti.DueDate) && tj.Priority < ti.Priority) {
 					indices[i], indices[j] = indices[j], indices[i]
 				}
 			}
@@ -185,10 +197,12 @@ func (m *Model) buildViews() {
 		}
 	}
 	for _, key := range upcomingSorted {
+		tasks := upcomingMap[key]
+		sortByPriority(tasks)
 		m.upcomingGroups = append(m.upcomingGroups, DateGroup{
 			Date:  upcomingDates[key],
 			Label: upcomingDates[key].Format("Mon, Jan 02"),
-			Tasks: upcomingMap[key],
+			Tasks: tasks,
 		})
 	}
 
@@ -307,6 +321,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeConfirmDelete {
 			return m.handleConfirmDelete(msg)
 		}
+		if m.mode == modePriority {
+			return m.handlePriority(msg)
+		}
 		return m.handleNormalMode(msg)
 	}
 
@@ -329,6 +346,43 @@ func (m Model) handleConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.mode = modeNormal
 	case "n", "N", "esc", "q":
+		m.mode = modeNormal
+	}
+	return m, nil
+}
+
+func (m Model) handlePriority(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	priorityMap := map[string]int{
+		"1": PriorityHighest,
+		"2": PriorityHigh,
+		"3": PriorityMedium,
+		"4": PriorityLow,
+		"5": PriorityLowest,
+		"0": PriorityNone,
+	}
+	labels := map[int]string{
+		PriorityHighest: "Highest",
+		PriorityHigh:    "High",
+		PriorityMedium:  "Medium",
+		PriorityLow:     "Low",
+		PriorityLowest:  "Lowest",
+		PriorityNone:    "None",
+	}
+
+	key := msg.String()
+	if p, ok := priorityMap[key]; ok {
+		task := m.selectedTask()
+		if task != nil {
+			if err := SetPriority(task, p); err != nil {
+				m.statusMsg = "Error: " + err.Error()
+			} else {
+				m.statusMsg = "Priority → " + labels[p]
+				m.statusTime = time.Now()
+				m = m.reload()
+			}
+		}
+		m.mode = modeNormal
+	} else if key == "esc" || key == "q" {
 		m.mode = modeNormal
 	}
 	return m, nil
@@ -666,6 +720,14 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case "p":
+		if m.focus == focusContent && m.activeView != viewLogbook {
+			task := m.selectedTask()
+			if task != nil {
+				m.mode = modePriority
+			}
+		}
+
 	case "s":
 		if m.focus == focusContent && m.activeView != viewLogbook {
 			if len(m.selected) > 0 {
@@ -783,6 +845,13 @@ func (m Model) View() string {
 			Foreground(lipgloss.Color(m.cfg.Theme.Overdue)).
 			Bold(true)
 		inputArea = "\n" + confirmStyle.Render(" Delete this task? [y/n]")
+	}
+
+	if m.mode == modePriority {
+		prStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(m.cfg.Theme.Accent)).
+			Bold(true)
+		inputArea = "\n" + prStyle.Render(" Priority: 1🔺 2⏫ 3🔼 4🔽 5⏬ 0 none")
 	}
 
 	return board + "\n" + footer + inputArea
@@ -1070,7 +1139,15 @@ func (m Model) renderTaskRow(task Task, cursor bool, maxWidth int, isOverdue boo
 	}
 	tagStr := strings.Join(tagParts, " ")
 
+	priorityStr := ""
+	if emoji, ok := priorityEmojis[task.Priority]; ok {
+		priorityStr = " " + emoji
+	}
+
 	line := prefix + bulletStyle.Render(bullet) + descStyle.Render(desc)
+	if priorityStr != "" {
+		line += priorityStr
+	}
 	if tagStr != "" {
 		line += " " + tagStr
 	}
@@ -1145,7 +1222,7 @@ func (m Model) renderFooter(width int) string {
 	} else if m.activeView == viewLogbook {
 		keys = "←/→ prev/next day  d undone  / filter  ? help  q quit"
 	} else {
-		keys = "n new  d done  s reschedule  e edit  D del  space select  v all  / filter  ? help  q quit"
+		keys = "n new  d done  s reschedule  p priority  e edit  D del  space select  v all  / filter  ? help"
 	}
 
 	keyStyle := lipgloss.NewStyle().
@@ -1179,6 +1256,7 @@ func (m Model) renderHelp() string {
     e               Edit task
     d               Toggle done/undone
     s               Reschedule task
+    p               Set priority
     D               Delete task
     /               Filter by text
     r               Reload from files

@@ -10,16 +10,41 @@ import (
 	"time"
 )
 
-// Task represents a single parsed Obsidian task.
+const (
+	PriorityNone    = 3
+	PriorityHighest = 0
+	PriorityHigh    = 1
+	PriorityMedium  = 2
+	PriorityLow     = 4
+	PriorityLowest  = 5
+)
+
+var priorityEmojis = map[int]string{
+	PriorityHighest: "🔺",
+	PriorityHigh:    "⏫",
+	PriorityMedium:  "🔼",
+	PriorityLow:     "🔽",
+	PriorityLowest:  "⏬",
+}
+
+var emojiToPriority = map[string]int{
+	"🔺": PriorityHighest,
+	"⏫": PriorityHigh,
+	"🔼": PriorityMedium,
+	"🔽": PriorityLow,
+	"⏬": PriorityLowest,
+}
+
 type Task struct {
 	Description    string
 	Done           bool
 	Tags           []string
+	Priority       int
 	DueDate        time.Time
 	CompletionDate time.Time
-	FilePath       string // absolute path to the daily note
-	LineNumber     int    // 1-based line number in the file
-	RawLine        string // original line text
+	FilePath       string
+	LineNumber     int
+	RawLine        string
 }
 
 var (
@@ -27,6 +52,7 @@ var (
 	tagRe        = regexp.MustCompile(`#[\w]+(?:/[\w]+)*`)
 	dueDateRe    = regexp.MustCompile(`📅\s*(\d{4}-\d{2}-\d{2})`)
 	doneDateRe   = regexp.MustCompile(`✅\s*(\d{4}-\d{2}-\d{2})`)
+	priorityRe   = regexp.MustCompile(`[🔺⏫🔼🔽⏬]`)
 )
 
 // ParseTask parses a single markdown line into a Task, if it matches.
@@ -62,17 +88,25 @@ func ParseTask(line string, filePath string, lineNumber int, noteDate time.Time)
 		}
 	}
 
-	// Build description: everything except tags and date markers
+	priority := PriorityNone
+	if pm := priorityRe.FindString(rest); pm != "" {
+		if p, ok := emojiToPriority[pm]; ok {
+			priority = p
+		}
+	}
+
 	desc := rest
 	desc = tagRe.ReplaceAllString(desc, "")
 	desc = dueDateRe.ReplaceAllString(desc, "")
 	desc = doneDateRe.ReplaceAllString(desc, "")
+	desc = priorityRe.ReplaceAllString(desc, "")
 	desc = strings.TrimSpace(desc)
 
 	return &Task{
 		Description:    desc,
 		Done:           done,
 		Tags:           tags,
+		Priority:       priority,
 		DueDate:        dueDate,
 		CompletionDate: completionDate,
 		FilePath:       filePath,
@@ -298,6 +332,34 @@ func RescheduleTask(task *Task, newDate time.Time) error {
 	lines[idx] = line
 	task.RawLine = line
 	task.DueDate = newDate
+	return writeLines(task.FilePath, lines)
+}
+
+func SetPriority(task *Task, priority int) error {
+	lines, err := readLines(task.FilePath)
+	if err != nil {
+		return err
+	}
+	idx := task.LineNumber - 1
+	if idx < 0 || idx >= len(lines) {
+		return fmt.Errorf("line %d out of range", task.LineNumber)
+	}
+
+	line := lines[idx]
+	line = priorityRe.ReplaceAllString(line, "")
+	line = strings.Join(strings.Fields(line), " ")
+
+	if emoji, ok := priorityEmojis[priority]; ok {
+		if loc := dueDateRe.FindStringIndex(line); loc != nil {
+			line = line[:loc[0]] + emoji + " " + line[loc[0]:]
+		} else {
+			line = line + " " + emoji
+		}
+	}
+
+	lines[idx] = line
+	task.RawLine = line
+	task.Priority = priority
 	return writeLines(task.FilePath, lines)
 }
 
