@@ -259,12 +259,16 @@ func DeleteTask(task *Task) error {
 }
 
 // CreateTask appends a new task to the appropriate daily note file.
-func CreateTask(cfg Config, description string, dueDate time.Time) error {
+func CreateTask(cfg Config, description string, dueDate time.Time, priority int) error {
 	dir := filepath.Join(cfg.Vault.Path, cfg.Vault.DailyNotesDir)
 	filename := dueDate.Format(cfg.Vault.DailyNoteFormat) + ".md"
 	fp := filepath.Join(dir, filename)
 
-	taskLine := fmt.Sprintf("- [ ] %s 📅 %s", description, dueDate.Format("2006-01-02"))
+	priorityStr := ""
+	if emoji, ok := priorityEmojis[priority]; ok {
+		priorityStr = " " + emoji
+	}
+	taskLine := fmt.Sprintf("- [ ] %s%s 📅 %s", description, priorityStr, dueDate.Format("2006-01-02"))
 
 	// If file doesn't exist, create with template
 	if _, err := os.Stat(fp); os.IsNotExist(err) {

@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const hPad = 2
+
 const (
 	viewToday = iota
 	viewUpcoming
@@ -79,7 +81,7 @@ func tagColor(tag string) lipgloss.Color {
 
 func NewModel(cfg Config, tasks []Task) Model {
 	ti := textinput.New()
-	ti.Placeholder = "Task description #tag"
+	ti.Placeholder = "Task description #tag p1-p5"
 	ti.CharLimit = 256
 	ti.Width = 50
 
@@ -308,7 +310,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.Width = m.width - 16
+		m.input.Width = m.width - 2*hPad - 16
 		return m, nil
 
 	case tea.KeyMsg:
@@ -421,7 +423,17 @@ func (m Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				value = dueDateRe.ReplaceAllString(value, "")
 				value = strings.TrimSpace(value)
 			}
-			if err := CreateTask(m.cfg, value, dueDate); err != nil {
+			priority := PriorityNone
+			pMap := map[string]int{"p1": PriorityHighest, "p2": PriorityHigh, "p3": PriorityMedium, "p4": PriorityLow, "p5": PriorityLowest}
+			for token, p := range pMap {
+				if strings.Contains(" "+value+" ", " "+token+" ") {
+					priority = p
+					value = strings.Replace(value, token, "", 1)
+					value = strings.TrimSpace(value)
+					break
+				}
+			}
+			if err := CreateTask(m.cfg, value, dueDate, priority); err != nil {
 				m.err = err
 				m.statusMsg = "Error: " + err.Error()
 			} else {
@@ -703,7 +715,7 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "n":
 		if m.activeView != viewLogbook {
 			m.mode = modeNewTask
-			m.input.Placeholder = "Task description #tag"
+			m.input.Placeholder = "Task description #tag p1-p5"
 			m.input.SetValue("")
 			m.input.Focus()
 			return m, m.input.Cursor.BlinkCmd()
@@ -813,10 +825,10 @@ func (m Model) View() string {
 		return m.renderHelp()
 	}
 
-	totalWidth := m.width - 4
+	totalWidth := m.width - 2*hPad
 	sidebarWidth := 22
 	contentWidth := totalWidth - sidebarWidth - 1
-	contentHeight := m.height - 5
+	contentHeight := m.height - 2 - 3
 
 	sidebar := m.renderSidebar(sidebarWidth, contentHeight)
 	content := m.renderContent(contentWidth, contentHeight)
@@ -855,7 +867,8 @@ func (m Model) View() string {
 		inputArea = "\n" + prStyle.Render(" Priority: 1🔺 2⏫ 3🔼 4🔽 5⏬ 0 none")
 	}
 
-	return board + "\n" + footer + inputArea
+	result := board + "\n" + footer + inputArea
+	return lipgloss.NewStyle().Padding(1, hPad).Render(result)
 }
 
 func (m Model) renderSidebar(width, height int) string {
