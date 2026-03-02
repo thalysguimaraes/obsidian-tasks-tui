@@ -133,7 +133,8 @@ func ParseFile(filePath string, noteDate time.Time, sectionHeading string) ([]Ta
 // ScanDailyNotes scans the daily notes directory for tasks within the configured date range.
 func ScanDailyNotes(cfg Config) ([]Task, error) {
 	dir := filepath.Join(cfg.Vault.Path, cfg.Vault.DailyNotesDir)
-	today := time.Now().Truncate(24 * time.Hour)
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	start := today.AddDate(0, 0, -cfg.Tasks.LogbookDays)
 	end := today.AddDate(0, 0, cfg.Tasks.LookaheadDays)
 
@@ -197,10 +198,11 @@ func ToggleDone(task *Task) error {
 	} else {
 		// Done: [ ] → [x], append ✅ date
 		line = strings.Replace(line, "[ ]", "[x]", 1)
-		today := time.Now().Format("2006-01-02")
-		line = line + " ✅ " + today
+		now := time.Now()
+		todayLocal := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		line = line + " ✅ " + todayLocal.Format("2006-01-02")
 		task.Done = true
-		task.CompletionDate = time.Now().Truncate(24 * time.Hour)
+		task.CompletionDate = todayLocal
 	}
 
 	lines[idx] = line

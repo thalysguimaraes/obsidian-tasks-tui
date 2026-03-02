@@ -111,8 +111,13 @@ func (m *Model) matchesFilter(t Task) bool {
 	return false
 }
 
+func localToday() time.Time {
+	now := time.Now()
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+}
+
 func (m *Model) buildViews() {
-	today := time.Now().Truncate(24 * time.Hour)
+	today := localToday()
 
 	m.todayTasks = nil
 	m.overdueStart = 0
@@ -347,7 +352,7 @@ func (m Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if value == "" {
 				return m, nil
 			}
-			dueDate := time.Now().Truncate(24 * time.Hour)
+			dueDate := localToday()
 			if m.activeView == viewUpcoming && len(m.upcomingGroups) > 0 {
 				groupIdx := m.groupIndexForCursor()
 				if groupIdx >= 0 && groupIdx < len(m.upcomingGroups) {
@@ -986,7 +991,7 @@ func (m Model) renderLogbookView(maxWidth, maxHeight int) string {
 		Foreground(lipgloss.Color(m.cfg.Theme.Accent)).
 		Bold(true)
 	dateLabel := g.Date.Format("Mon, Jan 02 2006")
-	today := time.Now().Truncate(24 * time.Hour)
+	today := localToday()
 	if g.Date.Truncate(24*time.Hour).Equal(today) {
 		dateLabel = "Today · " + g.Date.Format("Jan 02")
 	} else if g.Date.Truncate(24*time.Hour).Equal(today.AddDate(0, 0, -1)) {
@@ -1200,7 +1205,8 @@ func (m Model) renderHelp() string {
 
 func parseRelativeDate(input string) (time.Time, error) {
 	input = strings.TrimSpace(strings.ToLower(input))
-	today := time.Now().Truncate(24 * time.Hour)
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	if input == "" {
 		return time.Time{}, fmt.Errorf("empty date input")
