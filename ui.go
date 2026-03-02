@@ -825,10 +825,10 @@ func (m Model) View() string {
 		return m.renderHelp()
 	}
 
-	totalWidth := m.width - 2*hPad
+	totalWidth := m.width - 2*hPad - 2
 	sidebarWidth := 22
 	contentWidth := totalWidth - sidebarWidth - 1
-	contentHeight := m.height - 2 - 3
+	contentHeight := m.height - 4
 
 	sidebar := m.renderSidebar(sidebarWidth, contentHeight)
 	content := m.renderContent(contentWidth, contentHeight)
@@ -868,7 +868,7 @@ func (m Model) View() string {
 	}
 
 	result := board + "\n" + footer + inputArea
-	return lipgloss.NewStyle().Padding(1, hPad).Render(result)
+	return lipgloss.NewStyle().Padding(0, hPad).Render(result)
 }
 
 func (m Model) renderSidebar(width, height int) string {
