@@ -1237,7 +1237,7 @@ func (m Model) renderFooter(width int) string {
 		filterInfo = filterStyle.Render(" [filter: " + m.filter + "] ")
 	}
 
-	return statusPart + filterInfo + keyStyle.Render(keys)
+	return " " + statusPart + filterInfo + keyStyle.Render(keys)
 }
 
 func (m Model) renderHelp() string {
