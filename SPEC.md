@@ -4,7 +4,7 @@ A beautiful terminal UI for managing Obsidian tasks, built with Go + Bubble Tea.
 
 ## Overview
 
-Read and write tasks directly from Obsidian daily notes (Markdown files). No intermediate format, no sync — it IS the Obsidian data.
+Read and write tasks directly from Obsidian daily notes (Markdown files). No intermediate format — the markdown files are the source of truth, and the TUI should auto-sync when they change.
 
 ## Vault Configuration
 
@@ -64,7 +64,7 @@ The yatto UI uses a **2-pane layout**: project list on the left, task list on th
 │   Mar 02         │                                              │
 │   Mar 03         │                                              │
 └──────────────────┴──────────────────────────────────────────────┘
- n new · d done · e edit · D delete · m move · / filter · ? help
+ n new · d done · f follow-up · e edit · D delete · s reschedule · / filter · ? help
 ```
 
 ### Design principles:
@@ -91,12 +91,12 @@ The yatto UI uses a **2-pane layout**: project list on the left, task list on th
 | `Enter` or `d` | Toggle done/undone |
 | `n` | New task (inline input at bottom) |
 | `e` | Edit task description (inline) |
+| `f` | Create a follow-up task for tomorrow |
 | `D` | Delete task |
-| `m` | Move task to different date |
+| `s` | Reschedule task to a different date |
 | `/` | Filter by text |
-| `t` | Filter by tag |
 | `p` | Set priority (reorder) |
-| `Tab` | Cycle view: Today / Week / All |
+| `r` | Manual reload from files |
 | `?` | Help overlay |
 | `q` | Quit |
 
@@ -118,9 +118,15 @@ The yatto UI uses a **2-pane layout**: project list on the left, task list on th
 - When toggling undone: change `[x]` → `[ ]` and remove ` ✅ YYYY-MM-DD`
 - When creating: append task line under the `## :LiPencil: Open Space` heading in the target daily note
   - If daily note doesn't exist, create it with minimal frontmatter
+- When creating a follow-up: append `Follow up: <original description>` to tomorrow's daily note, preserving tags and priority
 - When editing: replace the exact line in the file
 - When moving date: remove from source file, add to target file
 - All writes are immediate (no save button) — the .md file is the source of truth
+
+### Sync behavior:
+- Watch the daily notes directory for markdown changes
+- Reload automatically on external create/write/remove/rename events
+- Keep `r` as a manual fallback if the watcher misses an event
 
 ### Daily note template (when creating new):
 ```markdown

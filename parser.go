@@ -48,11 +48,11 @@ type Task struct {
 }
 
 var (
-	taskRe       = regexp.MustCompile(`^(\s*)-\s\[([ xX])\]\s*(.*)$`)
-	tagRe        = regexp.MustCompile(`#[\w]+(?:/[\w]+)*`)
-	dueDateRe    = regexp.MustCompile(`📅\s*(\d{4}-\d{2}-\d{2})`)
-	doneDateRe   = regexp.MustCompile(`✅\s*(\d{4}-\d{2}-\d{2})`)
-	priorityRe   = regexp.MustCompile(`[🔺⏫🔼🔽⏬]`)
+	taskRe     = regexp.MustCompile(`^(\s*)-\s\[([ xX])\]\s*(.*)$`)
+	tagRe      = regexp.MustCompile(`#[\w]+(?:/[\w]+)*`)
+	dueDateRe  = regexp.MustCompile(`📅\s*(\d{4}-\d{2}-\d{2})`)
+	doneDateRe = regexp.MustCompile(`✅\s*(\d{4}-\d{2}-\d{2})`)
+	priorityRe = regexp.MustCompile(`[🔺⏫🔼🔽⏬]`)
 )
 
 // ParseTask parses a single markdown line into a Task, if it matches.
@@ -253,17 +253,52 @@ func DeleteTask(task *Task) error {
 	return writeLines(task.FilePath, lines)
 }
 
-// CreateTask appends a new task to the appropriate daily note file.
-func CreateTask(cfg Config, description string, dueDate time.Time, priority int) error {
+func buildTaskLine(description string, tags []string, priority int, dueDate time.Time, done bool, completionDate time.Time) string {
+	status := "[ ]"
+	if done {
+		status = "[x]"
+	}
+
+	var b strings.Builder
+	b.WriteString("- ")
+	b.WriteString(status)
+	b.WriteString(" ")
+	b.WriteString(strings.TrimSpace(description))
+
+	for _, tag := range tags {
+		if strings.TrimSpace(tag) == "" {
+			continue
+		}
+		b.WriteString(" ")
+		b.WriteString(tag)
+	}
+
+	if emoji, ok := priorityEmojis[priority]; ok {
+		b.WriteString(" ")
+		b.WriteString(emoji)
+	}
+
+	if !dueDate.IsZero() {
+		b.WriteString(" 📅 ")
+		b.WriteString(dueDate.Format("2006-01-02"))
+	}
+
+	if done && !completionDate.IsZero() {
+		b.WriteString(" ✅ ")
+		b.WriteString(completionDate.Format("2006-01-02"))
+	}
+
+	return b.String()
+}
+
+func appendTaskLine(cfg Config, dueDate time.Time, taskLine string) error {
 	dir := filepath.Join(cfg.Vault.Path, cfg.Vault.DailyNotesDir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
 	filename := dueDate.Format(cfg.Vault.DailyNoteFormat) + ".md"
 	fp := filepath.Join(dir, filename)
-
-	priorityStr := ""
-	if emoji, ok := priorityEmojis[priority]; ok {
-		priorityStr = " " + emoji
-	}
-	taskLine := fmt.Sprintf("- [ ] %s%s 📅 %s", description, priorityStr, dueDate.Format("2006-01-02"))
 
 	// If file doesn't exist, create with template
 	if _, err := os.Stat(fp); os.IsNotExist(err) {
@@ -307,6 +342,30 @@ created: %s
 	}
 
 	return writeLines(fp, lines)
+}
+
+// CreateTask appends a new task to the appropriate daily note file.
+func CreateTask(cfg Config, description string, dueDate time.Time, priority int) error {
+	taskLine := buildTaskLine(description, nil, priority, dueDate, false, time.Time{})
+	return appendTaskLine(cfg, dueDate, taskLine)
+}
+
+func CreateFollowUpTask(cfg Config, task Task) (time.Time, error) {
+	followUpDate := localToday().AddDate(0, 0, 1)
+	description := strings.TrimSpace(task.Description)
+	switch {
+	case strings.HasPrefix(strings.ToLower(description), "follow up:"):
+	case strings.HasPrefix(strings.ToLower(description), "follow-up:"):
+	default:
+		description = "Follow up: " + description
+	}
+
+	taskLine := buildTaskLine(description, task.Tags, task.Priority, followUpDate, false, time.Time{})
+	if err := appendTaskLine(cfg, followUpDate, taskLine); err != nil {
+		return time.Time{}, err
+	}
+
+	return followUpDate, nil
 }
 
 func RescheduleTask(task *Task, newDate time.Time) error {

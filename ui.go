@@ -44,6 +44,7 @@ type DateGroup struct {
 type Model struct {
 	cfg      Config
 	allTasks []Task
+	watcher  *dailyNotesWatcher
 
 	activeView    int
 	focus         int
@@ -57,14 +58,15 @@ type Model struct {
 	logbookGroups   []DateGroup
 	logbookDayIndex int
 
-	mode       int
-	width      int
-	height     int
-	input      textinput.Model
-	filter     string
-	statusMsg  string
-	statusTime time.Time
-	err        error
+	mode             int
+	width            int
+	height           int
+	input            textinput.Model
+	filter           string
+	statusMsg        string
+	statusTime       time.Time
+	err              error
+	ignoreWatchUntil time.Time
 
 	selected map[int]bool
 }
@@ -93,6 +95,13 @@ func NewModel(cfg Config, tasks []Task) Model {
 		activeView: viewToday,
 		focus:      focusSidebar,
 		selected:   make(map[int]bool),
+	}
+	watcher, err := newDailyNotesWatcher(cfg)
+	if err != nil {
+		m.statusMsg = "Auto-sync disabled: " + err.Error()
+		m.statusTime = time.Now()
+	} else {
+		m.watcher = watcher
 	}
 	m.buildViews()
 	return m
@@ -296,13 +305,28 @@ func (m Model) reload() Model {
 		m.statusMsg = "Reload error: " + err.Error()
 		return m
 	}
+	m.err = nil
 	m.allTasks = tasks
+	m.selected = make(map[int]bool)
 	m.buildViews()
 	return m
 }
 
+func (m Model) nextWatchCmd() tea.Cmd {
+	if m.watcher == nil {
+		return nil
+	}
+	return m.watcher.nextCmd()
+}
+
+func (m *Model) markInternalWrite(status string) {
+	m.statusMsg = status
+	m.statusTime = time.Now()
+	m.ignoreWatchUntil = m.statusTime.Add(1200 * time.Millisecond)
+}
+
 func (m Model) Init() tea.Cmd {
-	return nil
+	return m.nextWatchCmd()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -312,6 +336,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.input.Width = m.width - 2*hPad - 16
 		return m, nil
+
+	case fileWatchMsg:
+		cmd := m.nextWatchCmd()
+		if msg.err != nil {
+			m.statusMsg = "Auto-sync error: " + msg.err.Error()
+			m.statusTime = time.Now()
+			return m, cmd
+		}
+		if !m.ignoreWatchUntil.IsZero() && msg.at.Before(m.ignoreWatchUntil) {
+			return m, cmd
+		}
+		m = m.reload()
+		if m.err == nil {
+			m.statusMsg = "Synced from files"
+			m.statusTime = time.Now()
+		}
+		return m, cmd
 
 	case tea.KeyMsg:
 		if m.mode == modeNewTask || m.mode == modeEditTask || m.mode == modeFilter || m.mode == modeReschedule {
@@ -342,8 +383,7 @@ func (m Model) handleConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.err = err
 				m.statusMsg = "Error: " + err.Error()
 			} else {
-				m.statusMsg = "Task deleted"
-				m.statusTime = time.Now()
+				m.markInternalWrite("Task deleted")
 				m = m.reload()
 			}
 		}
@@ -379,8 +419,7 @@ func (m Model) handlePriority(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err := SetPriority(task, p); err != nil {
 				m.statusMsg = "Error: " + err.Error()
 			} else {
-				m.statusMsg = "Priority → " + labels[p]
-				m.statusTime = time.Now()
+				m.markInternalWrite("Priority → " + labels[p])
 				m = m.reload()
 			}
 		}
@@ -437,8 +476,7 @@ func (m Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.err = err
 				m.statusMsg = "Error: " + err.Error()
 			} else {
-				m.statusMsg = "Task created"
-				m.statusTime = time.Now()
+				m.markInternalWrite("Task created")
 				m = m.reload()
 			}
 
@@ -451,28 +489,12 @@ func (m Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if task == nil {
 				return m, nil
 			}
-			newLine := "- "
-			if task.Done {
-				newLine += "[x] "
-			} else {
-				newLine += "[ ] "
-			}
-			newLine += value
-			for _, tag := range task.Tags {
-				newLine += " " + tag
-			}
-			if !task.DueDate.IsZero() {
-				newLine += " 📅 " + task.DueDate.Format("2006-01-02")
-			}
-			if !task.CompletionDate.IsZero() {
-				newLine += " ✅ " + task.CompletionDate.Format("2006-01-02")
-			}
+			newLine := buildTaskLine(value, task.Tags, task.Priority, task.DueDate, task.Done, task.CompletionDate)
 			if err := UpdateTaskLine(task, newLine); err != nil {
 				m.err = err
 				m.statusMsg = "Error: " + err.Error()
 			} else {
-				m.statusMsg = "Task updated"
-				m.statusTime = time.Now()
+				m.markInternalWrite("Task updated")
 				m = m.reload()
 			}
 
@@ -503,8 +525,7 @@ func (m Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					count++
 				}
 				m.selected = make(map[int]bool)
-				m.statusMsg = fmt.Sprintf("%d tasks → %s", count, newDate.Format("Jan 02"))
-				m.statusTime = time.Now()
+				m.markInternalWrite(fmt.Sprintf("%d tasks → %s", count, newDate.Format("Jan 02")))
 				m = m.reload()
 			} else {
 				task := m.selectedTask()
@@ -515,8 +536,7 @@ func (m Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.err = err
 					m.statusMsg = "Error: " + err.Error()
 				} else {
-					m.statusMsg = "Rescheduled → " + newDate.Format("Jan 02")
-					m.statusTime = time.Now()
+					m.markInternalWrite("Rescheduled → " + newDate.Format("Jan 02"))
 					m = m.reload()
 				}
 			}
@@ -631,11 +651,10 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.statusMsg = "Error: " + err.Error()
 				} else {
 					if task.Done {
-						m.statusMsg = "Marked done"
+						m.markInternalWrite("Marked done")
 					} else {
-						m.statusMsg = "Marked undone"
+						m.markInternalWrite("Marked undone")
 					}
-					m.statusTime = time.Now()
 					m = m.reload()
 				}
 			}
@@ -682,8 +701,7 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					count++
 				}
 				m.selected = make(map[int]bool)
-				m.statusMsg = fmt.Sprintf("%d tasks marked done", count)
-				m.statusTime = time.Now()
+				m.markInternalWrite(fmt.Sprintf("%d tasks marked done", count))
 				m = m.reload()
 			} else {
 				task := m.selectedTask()
@@ -693,13 +711,27 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.statusMsg = "Error: " + err.Error()
 					} else {
 						if task.Done {
-							m.statusMsg = "Marked done"
+							m.markInternalWrite("Marked done")
 						} else {
-							m.statusMsg = "Marked undone"
+							m.markInternalWrite("Marked undone")
 						}
-						m.statusTime = time.Now()
 						m = m.reload()
 					}
+				}
+			}
+		}
+
+	case "f", "F":
+		if m.focus == focusContent && m.activeView != viewLogbook {
+			task := m.selectedTask()
+			if task != nil {
+				followUpDate, err := CreateFollowUpTask(m.cfg, *task)
+				if err != nil {
+					m.err = err
+					m.statusMsg = "Error: " + err.Error()
+				} else {
+					m.markInternalWrite("Follow-up → " + followUpDate.Format("Jan 02"))
+					m = m.reload()
 				}
 			}
 		}
@@ -796,8 +828,10 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "r":
 		m = m.reload()
-		m.statusMsg = "Reloaded"
-		m.statusTime = time.Now()
+		if m.err == nil {
+			m.statusMsg = "Reloaded"
+			m.statusTime = time.Now()
+		}
 	}
 
 	return m, nil
@@ -1237,7 +1271,7 @@ func (m Model) renderFooter(width int) string {
 	} else if m.activeView == viewLogbook {
 		keys = "←/→ prev/next day  d undone  / filter  ? help  q quit"
 	} else {
-		keys = "n new  d done  s reschedule  p priority  e edit  D del  space select  v all  / filter  ? help"
+		keys = "n new  d done  f follow-up  s reschedule  p priority  e edit  D del  space select  v all  / filter  ? help"
 	}
 
 	keyStyle := lipgloss.NewStyle().
@@ -1270,11 +1304,16 @@ func (m Model) renderHelp() string {
     n               New task
     e               Edit task
     d               Toggle done/undone
+    f               Create follow-up for tomorrow
     s               Reschedule task
     p               Set priority
     D               Delete task
     /               Filter by text
     r               Reload from files
+
+  Sync
+    Auto-sync       Reloads when daily note files change
+    r               Manual fallback reload
 
   Bulk Selection
     Space           Toggle select

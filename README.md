@@ -18,7 +18,7 @@ A terminal UI for managing [Obsidian Tasks](https://publish.obsidian.md/tasks/In
 │              ││  ○ Review PR from Feb 26          #work    │
 │              ││                                             │
 ╰──────────────╯╰─────────────────────────────────────────────╯
- n new  d done  e edit  / filter  ? help  q quit
+ n new  d done  f follow-up  e edit  / filter  ? help  q quit
 ```
 
 ## Features
@@ -29,6 +29,8 @@ A terminal UI for managing [Obsidian Tasks](https://publish.obsidian.md/tasks/In
 - **Section-scoped parsing** — only reads tasks from your configured section heading (e.g. `## Open Space`)
 - **Tag filtering** — mirrors Obsidian Tasks queries: requires tags, excludes `#habit` by default
 - **Create, edit, delete, toggle** — changes are written back to the daily note files
+- **Follow-up shortcut** — press `f` on a task to create `Follow up: ...` in tomorrow's daily note before closing the current one
+- **Auto-sync** — watches the daily notes folder and reloads when markdown files change externally
 - **Tag-based colors** — consistent color per tag across the UI
 
 ## Install
@@ -84,6 +86,7 @@ The only required field is `vault.path`. Everything else has sensible defaults.
 | `n` | New task |
 | `e` | Edit task |
 | `d` | Toggle done |
+| `f` | Create follow-up for tomorrow |
 | `D` | Delete task |
 | `/` | Filter by text |
 | `Esc` | Clear filter |
@@ -101,6 +104,8 @@ Tasks follow the [Obsidian Tasks](https://publish.obsidian.md/tasks/Introduction
 ```
 
 New tasks created via the TUI are written into the daily note file under the configured section heading.
+
+Follow-ups use the same write path, preserving the current task's tags and priority, and schedule the new task for the next local day.
 
 ## Built with
 
