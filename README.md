@@ -23,12 +23,12 @@ A terminal UI for managing [Obsidian Tasks](https://publish.obsidian.md/tasks/In
 
 ## Features
 
-- **Three views** — Today (due today + overdue), Upcoming (future tasks by date), Logbook (completed tasks)
+- **Three views** — Today (due today + overdue), Upcoming (future tasks by date), Logbook (closed tasks)
 - **Sidebar navigation** — switch views with `1` `2` `3` or `j`/`k`
 - **Obsidian Tasks compatible** — reads `- [ ]` / `- [x]` syntax with `📅` due dates and `✅` completion dates
 - **Section-scoped parsing** — only reads tasks from your configured section heading (e.g. `## Open Space`)
 - **Tag filtering** — mirrors Obsidian Tasks queries: requires tags, excludes `#habit` by default
-- **Create, edit, delete, toggle** — changes are written back to the daily note files
+- **Create, edit, cancel, toggle** — changes are written back to the daily note files
 - **Follow-up shortcut** — press `f` on a task to create `Follow up: ...` in tomorrow's daily note before closing the current one
 - **Auto-sync** — watches the daily notes folder and reloads when markdown files change externally
 - **Tag-based colors** — consistent color per tag across the UI
@@ -85,9 +85,9 @@ The only required field is `vault.path`. Everything else has sensible defaults.
 | `Enter` | Select view or toggle done |
 | `n` | New task |
 | `e` | Edit task |
-| `d` | Toggle done |
+| `d` | Toggle done / reopen |
 | `f` | Create follow-up for tomorrow |
-| `D` | Delete task |
+| `D` | Cancel task |
 | `/` | Filter by text |
 | `Esc` | Clear filter |
 | `r` | Reload from files |
@@ -101,11 +101,14 @@ Tasks follow the [Obsidian Tasks](https://publish.obsidian.md/tasks/Introduction
 ```markdown
 - [ ] Task description #tag 📅 2026-03-01
 - [x] Completed task #tag 📅 2026-02-28 ✅ 2026-02-28
+- [-] Cancelled task #tag 📅 2026-02-28 ❌ 2026-02-28
 ```
 
 New tasks created via the TUI are written into the daily note file under the configured section heading.
 
 Follow-ups use the same write path, preserving the current task's tags and priority, and schedule the new task for the next local day.
+
+Cancelling a task keeps it in the markdown file using the Obsidian Tasks cancelled status, so it drops out of the active lists but remains queryable in past notes and the logbook.
 
 ## Built with
 

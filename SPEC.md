@@ -64,7 +64,7 @@ The yatto UI uses a **2-pane layout**: project list on the left, task list on th
 │   Mar 02         │                                              │
 │   Mar 03         │                                              │
 └──────────────────┴──────────────────────────────────────────────┘
- n new · d done · f follow-up · e edit · D delete · s reschedule · / filter · ? help
+ n new · d done · f follow-up · e edit · D cancel · s reschedule · / filter · ? help
 ```
 
 ### Design principles:
@@ -88,11 +88,11 @@ The yatto UI uses a **2-pane layout**: project list on the left, task list on th
 |-----|--------|
 | `j/k` or `↑/↓` | Navigate items in current column |
 | `h/l` or `Tab` | Switch between panes (dates/tasks) |
-| `Enter` or `d` | Toggle done/undone |
+| `Enter` or `d` | Toggle done/reopen |
 | `n` | New task (inline input at bottom) |
 | `e` | Edit task description (inline) |
 | `f` | Create a follow-up task for tomorrow |
-| `D` | Delete task |
+| `D` | Cancel task |
 | `s` | Reschedule task to a different date |
 | `/` | Filter by text |
 | `p` | Set priority (reorder) |
@@ -115,11 +115,12 @@ The yatto UI uses a **2-pane layout**: project list on the left, task list on th
 
 ### Writing tasks:
 - When toggling done: change `[ ]` → `[x]` and append ` ✅ YYYY-MM-DD` (today)
-- When toggling undone: change `[x]` → `[ ]` and remove ` ✅ YYYY-MM-DD`
+- When reopening a completed task: change `[x]` or `[-]` → `[ ]` and remove ` ✅ YYYY-MM-DD` / ` ❌ YYYY-MM-DD`
 - When creating: append task line under the `## :LiPencil: Open Space` heading in the target daily note
   - If daily note doesn't exist, create it with minimal frontmatter
 - When creating a follow-up: append `Follow up: <original description>` to tomorrow's daily note, preserving tags and priority
 - When editing: replace the exact line in the file
+- When cancelling via the former delete flow: change `[ ]` → `[-]` and append ` ❌ YYYY-MM-DD` (today)
 - When moving date: remove from source file, add to target file
 - All writes are immediate (no save button) — the .md file is the source of truth
 

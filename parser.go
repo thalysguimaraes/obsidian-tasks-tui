@@ -38,21 +38,24 @@ var emojiToPriority = map[string]int{
 type Task struct {
 	Description    string
 	Done           bool
+	Cancelled      bool
 	Tags           []string
 	Priority       int
 	DueDate        time.Time
 	CompletionDate time.Time
+	CancelledDate  time.Time
 	FilePath       string
 	LineNumber     int
 	RawLine        string
 }
 
 var (
-	taskRe     = regexp.MustCompile(`^(\s*)-\s\[([ xX])\]\s*(.*)$`)
-	tagRe      = regexp.MustCompile(`#[\w]+(?:/[\w]+)*`)
-	dueDateRe  = regexp.MustCompile(`📅\s*(\d{4}-\d{2}-\d{2})`)
-	doneDateRe = regexp.MustCompile(`✅\s*(\d{4}-\d{2}-\d{2})`)
-	priorityRe = regexp.MustCompile(`[🔺⏫🔼🔽⏬]`)
+	taskRe          = regexp.MustCompile(`^(\s*)-\s\[([ xX-])\]\s*(.*)$`)
+	tagRe           = regexp.MustCompile(`#[\w]+(?:/[\w]+)*`)
+	dueDateRe       = regexp.MustCompile(`📅\s*(\d{4}-\d{2}-\d{2})`)
+	doneDateRe      = regexp.MustCompile(`✅\s*(\d{4}-\d{2}-\d{2})`)
+	cancelledDateRe = regexp.MustCompile(`❌\s*(\d{4}-\d{2}-\d{2})`)
+	priorityRe      = regexp.MustCompile(`[🔺⏫🔼🔽⏬]`)
 )
 
 // ParseTask parses a single markdown line into a Task, if it matches.
@@ -64,6 +67,7 @@ func ParseTask(line string, filePath string, lineNumber int, noteDate time.Time)
 	}
 
 	done := m[2] == "x" || m[2] == "X"
+	cancelled := m[2] == "-"
 	rest := m[3]
 
 	// Extract tags
@@ -88,6 +92,13 @@ func ParseTask(line string, filePath string, lineNumber int, noteDate time.Time)
 		}
 	}
 
+	var cancelledDate time.Time
+	if cm := cancelledDateRe.FindStringSubmatch(rest); cm != nil {
+		if t, err := time.Parse("2006-01-02", cm[1]); err == nil {
+			cancelledDate = t
+		}
+	}
+
 	priority := PriorityNone
 	if pm := priorityRe.FindString(rest); pm != "" {
 		if p, ok := emojiToPriority[pm]; ok {
@@ -99,20 +110,37 @@ func ParseTask(line string, filePath string, lineNumber int, noteDate time.Time)
 	desc = tagRe.ReplaceAllString(desc, "")
 	desc = dueDateRe.ReplaceAllString(desc, "")
 	desc = doneDateRe.ReplaceAllString(desc, "")
+	desc = cancelledDateRe.ReplaceAllString(desc, "")
 	desc = priorityRe.ReplaceAllString(desc, "")
 	desc = strings.TrimSpace(desc)
 
 	return &Task{
 		Description:    desc,
 		Done:           done,
+		Cancelled:      cancelled,
 		Tags:           tags,
 		Priority:       priority,
 		DueDate:        dueDate,
 		CompletionDate: completionDate,
+		CancelledDate:  cancelledDate,
 		FilePath:       filePath,
 		LineNumber:     lineNumber,
 		RawLine:        line,
 	}, true
+}
+
+func (t Task) IsCompleted() bool {
+	return t.Done || t.Cancelled
+}
+
+func (t Task) ClosedDate() time.Time {
+	if t.Done && !t.CompletionDate.IsZero() {
+		return t.CompletionDate
+	}
+	if t.Cancelled && !t.CancelledDate.IsZero() {
+		return t.CancelledDate
+	}
+	return time.Time{}
 }
 
 // ParseFile reads a daily note and extracts tasks within the given section.
@@ -217,14 +245,18 @@ func ToggleDone(task *Task) error {
 	}
 
 	line := lines[idx]
-	if task.Done {
-		// Undo: [x] → [ ], remove ✅ date
+	if task.IsCompleted() {
+		// Reopen: [x]/[-] → [ ], remove completion markers
 		line = strings.Replace(line, "[x]", "[ ]", 1)
 		line = strings.Replace(line, "[X]", "[ ]", 1)
+		line = strings.Replace(line, "[-]", "[ ]", 1)
 		line = doneDateRe.ReplaceAllString(line, "")
+		line = cancelledDateRe.ReplaceAllString(line, "")
 		line = strings.TrimRight(line, " ")
 		task.Done = false
+		task.Cancelled = false
 		task.CompletionDate = time.Time{}
+		task.CancelledDate = time.Time{}
 	} else {
 		// Done: [ ] → [x], append ✅ date
 		line = strings.Replace(line, "[ ]", "[x]", 1)
@@ -232,7 +264,9 @@ func ToggleDone(task *Task) error {
 		todayLocal := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		line = line + " ✅ " + todayLocal.Format("2006-01-02")
 		task.Done = true
+		task.Cancelled = false
 		task.CompletionDate = todayLocal
+		task.CancelledDate = time.Time{}
 	}
 
 	lines[idx] = line
@@ -240,7 +274,7 @@ func ToggleDone(task *Task) error {
 	return writeLines(task.FilePath, lines)
 }
 
-func DeleteTask(task *Task) error {
+func CancelTask(task *Task) error {
 	lines, err := readLines(task.FilePath)
 	if err != nil {
 		return err
@@ -249,14 +283,33 @@ func DeleteTask(task *Task) error {
 	if err := verifyLine(lines, idx, task.RawLine); err != nil {
 		return err
 	}
-	lines = append(lines[:idx], lines[idx+1:]...)
+
+	line := lines[idx]
+	line = strings.Replace(line, "[ ]", "[-]", 1)
+	line = strings.Replace(line, "[x]", "[-]", 1)
+	line = strings.Replace(line, "[X]", "[-]", 1)
+	line = doneDateRe.ReplaceAllString(line, "")
+	line = cancelledDateRe.ReplaceAllString(line, "")
+	now := time.Now()
+	todayLocal := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	line = strings.TrimRight(line, " ")
+	line = line + " ❌ " + todayLocal.Format("2006-01-02")
+
+	lines[idx] = line
+	task.Done = false
+	task.Cancelled = true
+	task.CompletionDate = time.Time{}
+	task.CancelledDate = todayLocal
+	task.RawLine = line
 	return writeLines(task.FilePath, lines)
 }
 
-func buildTaskLine(description string, tags []string, priority int, dueDate time.Time, done bool, completionDate time.Time) string {
+func buildTaskLine(description string, tags []string, priority int, dueDate time.Time, done bool, cancelled bool, completionDate time.Time, cancelledDate time.Time) string {
 	status := "[ ]"
 	if done {
 		status = "[x]"
+	} else if cancelled {
+		status = "[-]"
 	}
 
 	var b strings.Builder
@@ -286,6 +339,11 @@ func buildTaskLine(description string, tags []string, priority int, dueDate time
 	if done && !completionDate.IsZero() {
 		b.WriteString(" ✅ ")
 		b.WriteString(completionDate.Format("2006-01-02"))
+	}
+
+	if cancelled && !cancelledDate.IsZero() {
+		b.WriteString(" ❌ ")
+		b.WriteString(cancelledDate.Format("2006-01-02"))
 	}
 
 	return b.String()
@@ -346,7 +404,7 @@ created: %s
 
 // CreateTask appends a new task to the appropriate daily note file.
 func CreateTask(cfg Config, description string, dueDate time.Time, priority int) error {
-	taskLine := buildTaskLine(description, nil, priority, dueDate, false, time.Time{})
+	taskLine := buildTaskLine(description, nil, priority, dueDate, false, false, time.Time{}, time.Time{})
 	return appendTaskLine(cfg, dueDate, taskLine)
 }
 
@@ -360,7 +418,7 @@ func CreateFollowUpTask(cfg Config, task Task) (time.Time, error) {
 		description = "Follow up: " + description
 	}
 
-	taskLine := buildTaskLine(description, task.Tags, task.Priority, followUpDate, false, time.Time{})
+	taskLine := buildTaskLine(description, task.Tags, task.Priority, followUpDate, false, false, time.Time{}, time.Time{})
 	if err := appendTaskLine(cfg, followUpDate, taskLine); err != nil {
 		return time.Time{}, err
 	}

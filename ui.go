@@ -149,8 +149,12 @@ func (m *Model) buildViews() {
 		}
 		due := time.Date(t.DueDate.Year(), t.DueDate.Month(), t.DueDate.Day(), 0, 0, 0, 0, today.Location())
 
-		if t.Done {
-			compDate := time.Date(t.CompletionDate.Year(), t.CompletionDate.Month(), t.CompletionDate.Day(), 0, 0, 0, 0, today.Location())
+		if t.IsCompleted() {
+			closedDate := t.ClosedDate()
+			compDate := time.Time{}
+			if !closedDate.IsZero() {
+				compDate = time.Date(closedDate.Year(), closedDate.Month(), closedDate.Day(), 0, 0, 0, 0, today.Location())
+			}
 			if compDate.IsZero() {
 				compDate = due
 			}
@@ -379,11 +383,11 @@ func (m Model) handleConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y", "Y":
 		task := m.selectedTask()
 		if task != nil {
-			if err := DeleteTask(task); err != nil {
+			if err := CancelTask(task); err != nil {
 				m.err = err
 				m.statusMsg = "Error: " + err.Error()
 			} else {
-				m.markInternalWrite("Task deleted")
+				m.markInternalWrite("Task cancelled")
 				m = m.reload()
 			}
 		}
@@ -489,7 +493,7 @@ func (m Model) handleInputMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if task == nil {
 				return m, nil
 			}
-			newLine := buildTaskLine(value, task.Tags, task.Priority, task.DueDate, task.Done, task.CompletionDate)
+			newLine := buildTaskLine(value, task.Tags, task.Priority, task.DueDate, task.Done, task.Cancelled, task.CompletionDate, task.CancelledDate)
 			if err := UpdateTaskLine(task, newLine); err != nil {
 				m.err = err
 				m.statusMsg = "Error: " + err.Error()
@@ -646,11 +650,14 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			task := m.selectedTask()
 			if task != nil {
+				wasCancelled := task.Cancelled
 				if err := ToggleDone(task); err != nil {
 					m.err = err
 					m.statusMsg = "Error: " + err.Error()
 				} else {
-					if task.Done {
+					if wasCancelled {
+						m.markInternalWrite("Reopened")
+					} else if task.Done {
 						m.markInternalWrite("Marked done")
 					} else {
 						m.markInternalWrite("Marked undone")
@@ -706,11 +713,14 @@ func (m Model) handleNormalMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				task := m.selectedTask()
 				if task != nil {
+					wasCancelled := task.Cancelled
 					if err := ToggleDone(task); err != nil {
 						m.err = err
 						m.statusMsg = "Error: " + err.Error()
 					} else {
-						if task.Done {
+						if wasCancelled {
+							m.markInternalWrite("Reopened")
+						} else if task.Done {
 							m.markInternalWrite("Marked done")
 						} else {
 							m.markInternalWrite("Marked undone")
@@ -891,7 +901,7 @@ func (m Model) View() string {
 		confirmStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(m.cfg.Theme.Overdue)).
 			Bold(true)
-		inputArea = "\n" + confirmStyle.Render(" Delete this task? [y/n]")
+		inputArea = "\n" + confirmStyle.Render(" Cancel this task? [y/n]")
 	}
 
 	if m.mode == modePriority {
@@ -1137,7 +1147,7 @@ func (m Model) renderLogbookView(maxWidth, maxHeight int) string {
 			Foreground(lipgloss.Color(m.cfg.Theme.Muted)).
 			Italic(true).
 			PaddingLeft(2)
-		rows = append(rows, emptyStyle.Render("No completed tasks"))
+		rows = append(rows, emptyStyle.Render("No closed tasks"))
 	}
 
 	return strings.Join(rows, "\n")
@@ -1149,6 +1159,9 @@ func (m Model) renderTaskRow(task Task, cursor bool, maxWidth int, isOverdue boo
 	if task.Done {
 		bullet = "●"
 		bulletColor = lipgloss.Color(m.cfg.Theme.Done)
+	} else if task.Cancelled {
+		bullet = "✕"
+		bulletColor = lipgloss.Color(m.cfg.Theme.Overdue)
 	}
 	if isOverdue {
 		bulletColor = lipgloss.Color(m.cfg.Theme.Overdue)
@@ -1172,10 +1185,13 @@ func (m Model) renderTaskRow(task Task, cursor bool, maxWidth int, isOverdue boo
 	}
 
 	descStyle := lipgloss.NewStyle().PaddingLeft(1)
-	if task.Done {
+	if task.IsCompleted() {
 		descStyle = descStyle.
 			Foreground(lipgloss.Color(m.cfg.Theme.Done)).
 			Strikethrough(true)
+	}
+	if task.Cancelled {
+		descStyle = descStyle.Foreground(lipgloss.Color(m.cfg.Theme.Overdue))
 	}
 	if isOverdue {
 		descStyle = descStyle.Foreground(lipgloss.Color(m.cfg.Theme.Overdue))
@@ -1214,8 +1230,17 @@ func (m Model) renderTaskRow(task Task, cursor bool, maxWidth int, isOverdue boo
 }
 
 func (m Model) renderLogbookTaskRow(task Task, selected bool, maxWidth int) string {
+	bullet := "●"
+	bulletColor := lipgloss.Color(m.cfg.Theme.Muted)
+	textColor := lipgloss.Color(m.cfg.Theme.Muted)
+	if task.Cancelled {
+		bullet = "✕"
+		bulletColor = lipgloss.Color(m.cfg.Theme.Overdue)
+		textColor = lipgloss.Color(m.cfg.Theme.Overdue)
+	}
+
 	bulletStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(m.cfg.Theme.Muted)).
+		Foreground(bulletColor).
 		PaddingLeft(2)
 
 	desc := task.Description
@@ -1229,17 +1254,17 @@ func (m Model) renderLogbookTaskRow(task Task, selected bool, maxWidth int) stri
 
 	descStyle := lipgloss.NewStyle().
 		PaddingLeft(1).
-		Foreground(lipgloss.Color(m.cfg.Theme.Muted)).
+		Foreground(textColor).
 		Strikethrough(true)
 
 	var tagParts []string
 	for _, tag := range task.Tags {
-		tStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.cfg.Theme.Muted))
+		tStyle := lipgloss.NewStyle().Foreground(textColor)
 		tagParts = append(tagParts, tStyle.Render(tag))
 	}
 	tagStr := strings.Join(tagParts, " ")
 
-	line := bulletStyle.Render("●") + descStyle.Render(desc)
+	line := bulletStyle.Render(bullet) + descStyle.Render(desc)
 	if tagStr != "" {
 		line += " " + tagStr
 	}
@@ -1269,9 +1294,9 @@ func (m Model) renderFooter(width int) string {
 	if len(m.selected) > 0 {
 		keys = fmt.Sprintf("(%d selected) d done  s reschedule  v toggle all  esc clear  ? help  q quit", len(m.selected))
 	} else if m.activeView == viewLogbook {
-		keys = "←/→ prev/next day  d undone  / filter  ? help  q quit"
+		keys = "←/→ prev/next day  d reopen  / filter  ? help  q quit"
 	} else {
-		keys = "n new  d done  f follow-up  s reschedule  p priority  e edit  D del  space select  v all  / filter  ? help"
+		keys = "n new  d done  f follow-up  s reschedule  p priority  e edit  D cancel  space select  v all  / filter  ? help"
 	}
 
 	keyStyle := lipgloss.NewStyle().
@@ -1303,11 +1328,11 @@ func (m Model) renderHelp() string {
   Actions
     n               New task
     e               Edit task
-    d               Toggle done/undone
+    d               Toggle done/reopen
     f               Create follow-up for tomorrow
     s               Reschedule task
     p               Set priority
-    D               Delete task
+    D               Cancel task
     /               Filter by text
     r               Reload from files
 
