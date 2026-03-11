@@ -58,15 +58,15 @@ type Model struct {
 	logbookGroups   []DateGroup
 	logbookDayIndex int
 
-	mode             int
-	width            int
-	height           int
-	input            textinput.Model
-	filter           string
-	statusMsg        string
-	statusTime       time.Time
-	err              error
-	ignoreWatchUntil time.Time
+	mode                int
+	width               int
+	height              int
+	input               textinput.Model
+	filter              string
+	statusMsg           string
+	statusTime          time.Time
+	err                 error
+	preserveStatusUntil time.Time
 
 	selected map[int]bool
 }
@@ -130,6 +130,11 @@ func localToday() time.Time {
 
 func (m *Model) buildViews() {
 	today := localToday()
+	selectedLogbookDate := today
+	if len(m.logbookGroups) > 0 && m.logbookDayIndex < len(m.logbookGroups) {
+		g := m.logbookGroups[m.logbookDayIndex].Date
+		selectedLogbookDate = time.Date(g.Year(), g.Month(), g.Day(), 0, 0, 0, 0, today.Location())
+	}
 
 	m.todayTasks = nil
 	m.overdueStart = 0
@@ -240,6 +245,26 @@ func (m *Model) buildViews() {
 		})
 	}
 
+	if len(m.logbookGroups) > 0 {
+		todayKey := today.Format("2006-01-02")
+		if _, ok := logbookMap[todayKey]; !ok {
+			m.logbookGroups = append([]DateGroup{{
+				Date:  today,
+				Label: today.Format("Jan 02"),
+				Tasks: nil,
+			}}, m.logbookGroups...)
+		}
+	}
+
+	m.logbookDayIndex = 0
+	for i, g := range m.logbookGroups {
+		gDate := time.Date(g.Date.Year(), g.Date.Month(), g.Date.Day(), 0, 0, 0, 0, today.Location())
+		if gDate.Equal(selectedLogbookDate) {
+			m.logbookDayIndex = i
+			break
+		}
+	}
+
 	if m.logbookDayIndex >= len(m.logbookGroups) {
 		m.logbookDayIndex = max(0, len(m.logbookGroups)-1)
 	}
@@ -326,7 +351,7 @@ func (m Model) nextWatchCmd() tea.Cmd {
 func (m *Model) markInternalWrite(status string) {
 	m.statusMsg = status
 	m.statusTime = time.Now()
-	m.ignoreWatchUntil = m.statusTime.Add(1200 * time.Millisecond)
+	m.preserveStatusUntil = m.statusTime.Add(1200 * time.Millisecond)
 }
 
 func (m Model) Init() tea.Cmd {
@@ -348,11 +373,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusTime = time.Now()
 			return m, cmd
 		}
-		if !m.ignoreWatchUntil.IsZero() && msg.at.Before(m.ignoreWatchUntil) {
-			return m, cmd
-		}
 		m = m.reload()
 		if m.err == nil {
+			if !m.preserveStatusUntil.IsZero() && msg.at.Before(m.preserveStatusUntil) {
+				return m, cmd
+			}
 			m.statusMsg = "Synced from files"
 			m.statusTime = time.Now()
 		}
