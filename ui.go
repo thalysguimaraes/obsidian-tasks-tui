@@ -1152,6 +1152,7 @@ func (m Model) renderPrioritySeparator(label string, maxWidth int, color string)
 	line := fmt.Sprintf("  ── %s %s", label, strings.Repeat("─", pad))
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color(color)).
+		Faint(true).
 		Render(line)
 }
 
