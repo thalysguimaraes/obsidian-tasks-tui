@@ -1126,7 +1126,7 @@ func (m Model) renderUpcomingView(maxWidth, maxHeight int) string {
 		header := fmt.Sprintf("  ── %s %s", g.Label, strings.Repeat("─", max(0, maxWidth-len(g.Label)-6)))
 		rows = append(rows, headerStyle.Render(header))
 
-		taskRows, consumed := m.renderPrioritySeparatedRows(g.Tasks, maxWidth, 0, isActive, flatIdx, false)
+		taskRows, consumed := m.renderPrioritySeparatedRows(g.Tasks, maxWidth, flatIdx, isActive, flatIdx, false)
 		rows = append(rows, taskRows...)
 		flatIdx += consumed
 		rows = append(rows, "")
