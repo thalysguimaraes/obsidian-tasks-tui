@@ -1073,7 +1073,7 @@ func (m Model) renderTodayView(maxWidth, maxHeight int) string {
 	}
 
 	if m.overdueStart > 0 {
-		groupRows, consumed := m.renderPrioritySeparatedRows(m.todayTasks[:m.overdueStart], maxWidth, 0, isActive, flatIdx, false)
+		groupRows, consumed := m.renderPrioritySeparatedRows(m.todayTasks[:m.overdueStart], maxWidth, 0, isActive, m.contentCursor, false)
 		rows = append(rows, groupRows...)
 		flatIdx += consumed
 	}
@@ -1082,11 +1082,11 @@ func (m Model) renderTodayView(maxWidth, maxHeight int) string {
 		if m.overdueStart > 0 && len(m.todayTasks[:m.overdueStart]) > 0 {
 			rows = append(rows, "")
 		}
-		overdueRows, consumed := m.renderPrioritySeparatedRows(m.todayTasks[m.overdueStart:], maxWidth, m.overdueStart, isActive, flatIdx, true)
+		overdueRows, consumed := m.renderPrioritySeparatedRows(m.todayTasks[m.overdueStart:], maxWidth, m.overdueStart, isActive, m.contentCursor, true)
 		rows = append(rows, overdueRows...)
 		flatIdx += consumed
 	} else if m.overdueStart == 0 {
-		dueRows, consumed := m.renderPrioritySeparatedRows(m.todayTasks, maxWidth, 0, isActive, flatIdx, false)
+		dueRows, consumed := m.renderPrioritySeparatedRows(m.todayTasks, maxWidth, 0, isActive, m.contentCursor, false)
 		rows = append(rows, dueRows...)
 		flatIdx += consumed
 	}
@@ -1126,7 +1126,7 @@ func (m Model) renderUpcomingView(maxWidth, maxHeight int) string {
 		header := fmt.Sprintf("  ── %s %s", g.Label, strings.Repeat("─", max(0, maxWidth-len(g.Label)-6)))
 		rows = append(rows, headerStyle.Render(header))
 
-		taskRows, consumed := m.renderPrioritySeparatedRows(g.Tasks, maxWidth, flatIdx, isActive, flatIdx, false)
+		taskRows, consumed := m.renderPrioritySeparatedRows(g.Tasks, maxWidth, flatIdx, isActive, m.contentCursor, false)
 		rows = append(rows, taskRows...)
 		flatIdx += consumed
 		rows = append(rows, "")
